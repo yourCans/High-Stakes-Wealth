@@ -3,3 +3,4 @@ yfinance
 pycoingecko
 pandas
 matplotlib
+fpdf
