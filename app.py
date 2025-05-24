@@ -13,12 +13,17 @@ SCOPE = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],
-    scopes=SCOPE
-)
+import json
+import base64
 
+# Decode base64-encoded JSON from secrets
+decoded = base64.b64decode(st.secrets["gcp"]["encoded_key"]).decode("utf-8")
+service_account_info = json.loads(decoded)
+
+# Authenticate
+creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPE)
 gc = gspread.authorize(creds)
+
 sh = gc.open_by_url("https://docs.google.com/spreadsheets/d/1y-3oAxZAqtIbfDhyJyfAPwg9VafBUjY3SPs_HVFjcDI/edit")
 worksheet = sh.worksheet("Sheet1")
 
