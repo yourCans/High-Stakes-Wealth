@@ -1,6 +1,8 @@
 streamlit
+google-auth
 yfinance
 pycoingecko
 pandas
 matplotlib
 fpdf
+gspread
