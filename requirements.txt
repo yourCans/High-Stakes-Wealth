@@ -1,5 +1,6 @@
 streamlit
 google-auth
+google-auth-oauthlib
 yfinance
 pycoingecko
 pandas
