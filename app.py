@@ -7,6 +7,7 @@ import smtplib
 from email.message import EmailMessage
 import os
 import re
+import matplotlib.pyplot as plt
 
 # Google Sheets setup
 # Restrict OAuth scope to spreadsheets only to follow least-privilege.
@@ -97,37 +98,90 @@ The High-Stakes Wealth Team
         smtp.login(sender_email, sender_password)
         smtp.send_message(msg)
 
-# Streamlit form
-st.title("📬 Sign Up for High-Stakes Wealth Alerts")
-st.write("Join our insider list to get:")
-st.markdown("""• 📊 Weekly portfolio summaries  
-• 🔔 Price movement alerts  
-• 🧠 New AI investment picks""")
+def render_signup_view() -> None:
+    st.title("📬 Sign Up for High-Stakes Wealth Alerts")
+    st.write("Join our insider list to get:")
+    st.markdown("""• 📊 Weekly portfolio summaries  
+    • 🔔 Price movement alerts  
+    • 🧠 New AI investment picks""")
 
-with st.form("signup_form", clear_on_submit=True):
-    input_name = st.text_input("Your Name")
-    input_email = st.text_input("Your Email")
-    submitted = st.form_submit_button("Sign Me Up")
+    with st.form("signup_form", clear_on_submit=True):
+        input_name = st.text_input("Your Name")
+        input_email = st.text_input("Your Email")
+        submitted = st.form_submit_button("Sign Me Up")
 
-    if submitted:
-        name = (input_name or "").strip()
-        email = (input_email or "").strip()
+        if submitted:
+            name = (input_name or "").strip()
+            email = (input_email or "").strip()
 
-        if not name or not email:
-            st.error("Please fill in both name and email.")
-        elif not is_valid_email(email):
-            st.error("Please enter a valid email address.")
-        else:
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                worksheet = get_worksheet()
-                worksheet.append_row([name, email, now])
-            except Exception as e:
-                st.error("We couldn't save your signup right now. Please try again shortly.")
+            if not name or not email:
+                st.error("Please fill in both name and email.")
+            elif not is_valid_email(email):
+                st.error("Please enter a valid email address.")
             else:
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 try:
-                    send_confirmation_email(name, email)
+                    worksheet = get_worksheet()
+                    worksheet.append_row([name, email, now])
                 except Exception:
-                    st.warning("You're added, but we couldn't send the confirmation email.")
+                    st.error("We couldn't save your signup right now. Please try again shortly.")
                 else:
-                    st.success("✅ You’ve been added and a confirmation email has been sent!")
+                    try:
+                        send_confirmation_email(name, email)
+                    except Exception:
+                        st.warning("You're added, but we couldn't send the confirmation email.")
+                    else:
+                        st.success("✅ You’ve been added and a confirmation email has been sent!")
+
+
+def render_dashboard_view() -> None:
+    st.title("📊 Portfolio Dashboard")
+    st.caption("Current breakdown of your portfolio risk allocation")
+
+    labels = ["High-Risk", "Low-Risk"]
+    values = [75, 25]
+    colors = ["#ff6b6b", "#4dabf7"]
+
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
+    metric_col1.metric("High-Risk", "75%")
+    metric_col2.metric("Low-Risk", "25%")
+    metric_col3.metric("Total", "100%")
+
+    chart_col1, chart_col2 = st.columns(2)
+
+    with chart_col1:
+        st.subheader("Allocation – Donut")
+        fig1, ax1 = plt.subplots(figsize=(4, 4))
+        ax1.pie(
+            values,
+            labels=labels,
+            colors=colors,
+            autopct="%1.0f%%",
+            startangle=90,
+            wedgeprops=dict(width=0.5),
+        )
+        ax1.axis("equal")
+        st.pyplot(fig1, clear_figure=True)
+
+    with chart_col2:
+        st.subheader("Allocation – Bar")
+        fig2, ax2 = plt.subplots(figsize=(5, 3))
+        ax2.barh(labels, values, color=colors)
+        ax2.set_xlim(0, 100)
+        ax2.set_xlabel("Percent of Portfolio")
+        for index, value in enumerate(values):
+            ax2.text(value + 1, index, f"{value}%", va="center")
+        st.pyplot(fig2, clear_figure=True)
+
+
+def main() -> None:
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("View", ("Dashboard", "Sign Up"))
+
+    if page == "Dashboard":
+        render_dashboard_view()
+    else:
+        render_signup_view()
+
+
+main()
