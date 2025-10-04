@@ -7,6 +7,7 @@ import smtplib
 from email.message import EmailMessage
 import os
 import re
+import traceback
 
 # Google Sheets setup
 # Restrict OAuth scope to spreadsheets only to follow least-privilege.
@@ -36,7 +37,7 @@ def get_gspread_client() -> gspread.client.Client:
 
 
 @st.cache_resource(show_spinner=False)
-def get_worksheet() -> gspread.models.Worksheet:
+def get_spreadsheet() -> gspread.models.Spreadsheet:  # type: ignore[valid-type]
     sheet_url = None
     try:
         sheet_url = st.secrets.get("gcp", {}).get("sheet_url")  # type: ignore[attr-defined]
@@ -48,7 +49,12 @@ def get_worksheet() -> gspread.models.Worksheet:
         raise RuntimeError("Missing Google Sheet URL. Set 'gcp.sheet_url' in secrets or SHEET_URL env var.")
 
     gc = get_gspread_client()
-    sh = gc.open_by_url(sheet_url)
+    return gc.open_by_url(sheet_url)
+
+
+@st.cache_resource(show_spinner=False)
+def get_worksheet() -> gspread.models.Worksheet:
+    sh = get_spreadsheet()
     return sh.worksheet("Sheet1")
 
 def get_email_credentials() -> tuple[str, str]:
@@ -97,6 +103,67 @@ The High-Stakes Wealth Team
         smtp.login(sender_email, sender_password)
         smtp.send_message(msg)
 
+
+def _append_error_log_to_file(error_context: str, error: Exception) -> None:
+    """Append error details to a local log file as a fallback.
+
+    This function must never raise.
+    """
+    try:
+        logs_path = os.path.join("logs", "error.log")
+        os.makedirs(os.path.dirname(logs_path), exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        error_type = type(error).__name__
+        # Keep the file log single-line per entry for easier grepping
+        tb = " ".join(traceback.format_exception_only(type(error), error)).strip()
+        with open(logs_path, "a", encoding="utf-8") as f:
+            f.write(f"{timestamp}\t{error_context}\t{error_type}\t{str(error)}\t{tb}\n")
+    except Exception:
+        # Final fallback: swallow to avoid surfacing logging issues to users
+        pass
+
+
+def _append_error_log_to_sheets(error_context: str, error: Exception) -> bool:
+    """Try to append error details to an 'ErrorLog' worksheet. Returns True on success.
+
+    This function should not raise; it returns False if anything goes wrong.
+    """
+    try:
+        sh = get_spreadsheet()
+        try:
+            ws = sh.worksheet("ErrorLog")
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title="ErrorLog", rows=100, cols=6)
+            ws.append_row(["Timestamp", "Context", "ErrorType", "Message", "Traceback"])
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        error_type = type(error).__name__
+        # Traceback can be long; cap to a reasonable size for a single cell
+        tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        if len(tb) > 25000:
+            tb = tb[:25000] + "\n… (truncated)"
+        ws.append_row([timestamp, error_context, error_type, str(error), tb])
+        return True
+    except Exception:
+        return False
+
+
+def log_error(error_context: str, error: Exception, *, skip_sheets: bool = False) -> None:
+    """Best-effort error logging to Sheets and/or local file.
+
+    - If skip_sheets is True, only write to file (useful when the Sheets operation failed).
+    - Otherwise, attempt Sheets first, then fall back to file.
+    """
+    try:
+        wrote_to_sheets = False
+        if not skip_sheets:
+            wrote_to_sheets = _append_error_log_to_sheets(error_context, error)
+        if not wrote_to_sheets:
+            _append_error_log_to_file(error_context, error)
+    except Exception:
+        # Never let logging raise
+        pass
+
 # Streamlit form
 st.title("📬 Sign Up for High-Stakes Wealth Alerts")
 st.write("Join our insider list to get:")
@@ -123,11 +190,13 @@ with st.form("signup_form", clear_on_submit=True):
                 worksheet = get_worksheet()
                 worksheet.append_row([name, email, now])
             except Exception as e:
+                log_error("Sheets: append signup row", e, skip_sheets=True)
                 st.error("We couldn't save your signup right now. Please try again shortly.")
             else:
                 try:
                     send_confirmation_email(name, email)
-                except Exception:
+                except Exception as e:
+                    log_error("Email: send confirmation", e)
                     st.warning("You're added, but we couldn't send the confirmation email.")
                 else:
                     st.success("✅ You’ve been added and a confirmation email has been sent!")
